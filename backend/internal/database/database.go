@@ -78,6 +78,7 @@ func Open(ctx context.Context, cfg config.Config, log *slog.Logger) (*gorm.DB, *
 func migrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&model.Role{}, &model.User{}, &model.AuditLog{}, &model.SensorEvidence{},
+		&model.EvidenceReviewSnapshot{},
 		&model.TransportContainer{},
 		&model.TemperatureWindow{},
 		&model.ExcursionEvent{},
@@ -131,6 +132,9 @@ func Seed(ctx context.Context, db *gorm.DB) error {
 	if err := seedSensorEvidence(ctx, db); err != nil {
 		return err
 	}
+	if err := seedEvidenceReviewSnapshot(ctx, db); err != nil {
+		return err
+	}
 
 	if err := seedDispositionDecision(ctx, db); err != nil {
 		return err
@@ -182,7 +186,7 @@ func seedExcursionEvent(ctx context.Context, db *gorm.DB) error {
 	items := []model.ExcursionEvent{
 		{BaseModel: model.BaseModel{Code: "EE-001", Name: "TC-003 深低温回升", Status: "open", Version: 1, Description: "温度连续 12 分钟高于 -60C"}, ContainerCode: "TC-003", WindowCode: "TW-002", ObservedTempC: -41.8, DurationMinutes: 12, DetectedAt: now.Add(-35 * time.Minute), SensorEvidence: "minio://sensor/tc-003/excursion.csv", Facility: "杭州研究中心", Owner: "未分配", Category: "高温偏差", RiskLevel: "critical", MetricValue: -41.8, MetricUnit: "C", EffectiveAt: now.Add(-35 * time.Minute), Evidence: "minio://sensor/tc-003/excursion.csv", RelatedCode: "TC-003"},
 		{BaseModel: model.BaseModel{Code: "EE-002", Name: "TC-002 短时接近上限", Status: "in_review", Version: 1, Description: "7.6C 持续 8 分钟，尚未越过 8C"}, ContainerCode: "TC-002", WindowCode: "TW-001", ObservedTempC: 7.6, DurationMinutes: 8, DetectedAt: now.Add(-2 * time.Hour), SensorEvidence: "minio://sensor/tc-002/trace.csv", Reviewer: "reviewer", Facility: "沪杭运输线", Owner: "reviewer", Category: "趋势预警", RiskLevel: "medium", MetricValue: 7.6, MetricUnit: "C", EffectiveAt: now.Add(-2 * time.Hour), Evidence: "minio://sensor/tc-002/trace.csv", RelatedCode: "TC-002"},
-		{BaseModel: model.BaseModel{Code: "EE-003", Name: "TC-001 门开短时波动", Status: "decided", Version: 2, Description: "峰值 8.4C 持续 3 分钟，稳定性评估可接受"}, ContainerCode: "TC-001", WindowCode: "TW-001", ObservedTempC: 8.4, DurationMinutes: 3, DetectedAt: now.Add(-6 * time.Hour), SensorEvidence: "minio://sensor/tc-001/door-open.csv", Reviewer: "reviewer", Facility: "上海配送中心", Owner: "reviewer", Category: "短时高温", RiskLevel: "low", MetricValue: 8.4, MetricUnit: "C", EffectiveAt: now.Add(-6 * time.Hour), Evidence: "minio://sensor/tc-001/door-open.csv", RelatedCode: "TC-001"},
+		{BaseModel: model.BaseModel{Code: "EE-003", Name: "TC-001 门开短时波动", Status: "decided", Version: 2, Description: "峰值 8.4C 持续 3 分钟，稳定性评估可接受"}, ContainerCode: "TC-001", WindowCode: "TW-001", ObservedTempC: 8.4, DurationMinutes: 3, DetectedAt: now.Add(-6 * time.Hour), SensorEvidence: "minio://sensor/tc-001/door-open.csv", Reviewer: "reviewer", Facility: "上海配送中心", Owner: "reviewer", Category: "短时高温", RiskLevel: "low", MetricValue: 8.4, MetricUnit: "C", EffectiveAt: now.Add(-6 * time.Hour), Evidence: "minio://sensor/tc-001/door-open.csv", RelatedCode: "TC-001", SnapshotCode: "SRS-003"},
 	}
 	return db.WithContext(ctx).Create(&items).Error
 }
@@ -195,7 +199,7 @@ func seedDispositionDecision(ctx context.Context, db *gorm.DB) error {
 	now := time.Now().UTC()
 	items := []model.DispositionDecision{
 		{BaseModel: model.BaseModel{Code: "DD-001", Name: "EE-001 处置提议", Status: "draft", Version: 1, Description: "建议隔离并进行稳定性评估"}, ExcursionCode: "EE-001", DecisionBasis: "深低温窗口超限 18.2C", SensorEvidence: "minio://sensor/tc-003/excursion.csv", ProposedBy: "operator", Facility: "质量放行组", Owner: "operator", Category: "隔离提议", RiskLevel: "critical", MetricValue: -41.8, MetricUnit: "C", EffectiveAt: now.Add(-20 * time.Minute), Evidence: "minio://sensor/tc-003/excursion.csv", RelatedCode: "EE-001"},
-		{BaseModel: model.BaseModel{Code: "DD-002", Name: "EE-003 放行决定", Status: "release", Version: 2, Description: "3 分钟短时波动低于允许时长"}, ExcursionCode: "EE-003", DecisionBasis: "稳定性报告 SR-1021 支持继续使用", SensorEvidence: "minio://sensor/tc-001/door-open.csv", ProposedBy: "operator", ApprovedBy: "reviewer", DecidedAt: timePointer(now.Add(-5 * time.Hour)), Facility: "质量放行组", Owner: "operator", Category: "放行", RiskLevel: "low", MetricValue: 8.4, MetricUnit: "C", EffectiveAt: now.Add(-5 * time.Hour), Evidence: "minio://sensor/tc-001/door-open.csv", RelatedCode: "EE-003"},
+		{BaseModel: model.BaseModel{Code: "DD-002", Name: "EE-003 放行决定", Status: "release", Version: 2, Description: "3 分钟短时波动低于允许时长"}, ExcursionCode: "EE-003", DecisionBasis: "稳定性报告 SR-1021 支持继续使用", SensorEvidence: "minio://sensor/tc-001/door-open.csv", ProposedBy: "operator", ApprovedBy: "reviewer", DecidedAt: timePointer(now.Add(-5 * time.Hour)), Facility: "质量放行组", Owner: "operator", Category: "放行", RiskLevel: "low", MetricValue: 8.4, MetricUnit: "C", EffectiveAt: now.Add(-5 * time.Hour), Evidence: "minio://sensor/tc-001/door-open.csv", RelatedCode: "EE-003", SnapshotSHA256: strings.Repeat("c", 64), SnapshotEvidenceCode: "SE-003"},
 		{BaseModel: model.BaseModel{Code: "DD-003", Name: "历史隔离决定", Status: "quarantine", Version: 2, Description: "等待第三方稳定性复核"}, ExcursionCode: "EE-HISTORY", DecisionBasis: "证据不足，维持隔离", SensorEvidence: "minio://sensor/history-511.csv", ProposedBy: "operator", ApprovedBy: "admin", DecidedAt: timePointer(now.Add(-24 * time.Hour)), Facility: "质量放行组", Owner: "operator", Category: "隔离", RiskLevel: "high", MetricValue: 11.2, MetricUnit: "C", EffectiveAt: now.Add(-24 * time.Hour), Evidence: "minio://sensor/history-511.csv", RelatedCode: "EE-HISTORY"},
 	}
 	return db.WithContext(ctx).Create(&items).Error
@@ -216,3 +220,17 @@ func seedSensorEvidence(ctx context.Context, db *gorm.DB) error {
 }
 
 func timePointer(value time.Time) *time.Time { return &value }
+
+// seedEvidenceReviewSnapshot freezes the review snapshot for the already-decided demo excursion
+// (EE-003), pinning evidence SE-003 and its SHA-256. Open/in_review excursions intentionally have
+// no snapshot so reviewers can exercise the snapshot gate.
+func seedEvidenceReviewSnapshot(ctx context.Context, db *gorm.DB) error {
+	var count int64
+	if err := db.WithContext(ctx).Model(&model.EvidenceReviewSnapshot{}).Count(&count).Error; err != nil || count > 0 {
+		return err
+	}
+	items := []model.EvidenceReviewSnapshot{
+		{Code: "SRS-003", ExcursionCode: "EE-003", EvidenceCode: "SE-003", SHA256: strings.Repeat("c", 64), ContainerCode: "TC-001", CreatedAt: time.Now().UTC(), CreatedBy: "reviewer"},
+	}
+	return db.WithContext(ctx).Create(&items).Error
+}

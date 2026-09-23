@@ -38,8 +38,26 @@ export interface DomainRecord {
   proposedBy?: string;
   approvedBy?: string;
   decidedAt?: string | null;
+  // Cold-chain evidence review snapshot fields surfaced on excursions and dispositions.
+  snapshotCode?: string;
+  snapshotSha256?: string;
+  snapshotEvidenceCode?: string;
+  reviewBlockCode?: string;
+  reviewBlockReason?: string;
+  reviewConflictRef?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface EvidenceReviewSnapshot {
+  id: number;
+  code: string;
+  excursionCode: string;
+  evidenceCode: string;
+  sha256: string;
+  containerCode: string;
+  createdAt: string;
+  createdBy: string;
 }
 
 export interface PageMeta { page: number; pageSize: number; total: number }

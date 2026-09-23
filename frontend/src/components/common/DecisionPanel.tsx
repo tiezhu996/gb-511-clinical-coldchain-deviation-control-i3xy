@@ -6,6 +6,6 @@ import { EvidenceList } from './EvidenceList';
 export function DecisionPanel({ decision, compact = false }: { decision?: DomainRecord | null; compact?: boolean }) {
   return <section className={`decision-panel ${compact ? 'decision-panel--compact' : ''}`}>
     <header><span><GavelOutlinedIcon />处置决定</span>{decision ? <StatusBadge status={decision.status} /> : <StatusBadge status="pending" />}</header>
-    {decision ? <><p>{decision.decisionBasis || decision.description}</p><dl><div><dt>偏差事件</dt><dd>{decision.excursionCode || decision.relatedCode}</dd></div><div><dt>提议人</dt><dd>{decision.proposedBy || decision.owner}</dd></div><div><dt>复核人</dt><dd>{decision.approvedBy || '待独立复核'}</dd></div></dl><EvidenceList evidence={decision.sensorEvidence || decision.evidence} /></> : <p className="muted">尚未形成处置提议。</p>}
+    {decision ? <><p>{decision.decisionBasis || decision.description}</p><dl><div><dt>偏差事件</dt><dd>{decision.excursionCode || decision.relatedCode}</dd></div><div><dt>提议人</dt><dd>{decision.proposedBy || decision.owner}</dd></div><div><dt>复核人</dt><dd>{decision.approvedBy || '待独立复核'}</dd></div>{decision.snapshotSha256 && <div><dt>复核快照摘要</dt><dd>{decision.snapshotSha256.slice(0, 12)}</dd></div>}{decision.snapshotEvidenceCode && <div><dt>快照证据编号</dt><dd>{decision.snapshotEvidenceCode}</dd></div>}</dl><EvidenceList evidence={decision.sensorEvidence || decision.evidence} /></> : <p className="muted">尚未形成处置提议。</p>}
   </section>;
 }

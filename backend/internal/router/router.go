@@ -35,6 +35,7 @@ func New(cfg config.Config, db *gorm.DB, redisClient *redis.Client, logger *slog
 	excursionEventRepository := repository.NewExcursionEventRepository(db)
 	dispositionDecisionRepository := repository.NewDispositionDecisionRepository(db)
 	sensorEvidenceRepository := repository.NewSensorEvidenceRepository(db)
+	evidenceReviewSnapshotRepository := repository.NewEvidenceReviewSnapshotRepository(db)
 	minioClient, minioErr := minio.New(cfg.MinIOEndpoint, &minio.Options{Creds: credentials.NewStaticV4(cfg.MinIOAccessKey, cfg.MinIOSecretKey, ""), Secure: cfg.MinIOUseSSL})
 	if minioErr != nil {
 		logger.Error("object storage client unavailable", "error", minioErr)
@@ -42,14 +43,16 @@ func New(cfg config.Config, db *gorm.DB, redisClient *redis.Client, logger *slog
 	}
 	transportContainerService := service.NewTransportContainerService(transportContainerRepository, securityService)
 	temperatureWindowService := service.NewTemperatureWindowService(temperatureWindowRepository, securityService)
-	excursionEventService := service.NewExcursionEventService(excursionEventRepository, dispositionDecisionRepository, sensorEvidenceRepository, securityService)
-	dispositionDecisionService := service.NewDispositionDecisionService(dispositionDecisionRepository, sensorEvidenceRepository, securityService)
 	sensorEvidenceService := service.NewSensorEvidenceService(sensorEvidenceRepository, minioClient, cfg.MinIOBucket)
+	evidenceReviewSnapshotService := service.NewEvidenceReviewSnapshotService(evidenceReviewSnapshotRepository, sensorEvidenceRepository)
+	excursionEventService := service.NewExcursionEventService(excursionEventRepository, dispositionDecisionRepository, evidenceReviewSnapshotService, securityService)
+	dispositionDecisionService := service.NewDispositionDecisionService(dispositionDecisionRepository, evidenceReviewSnapshotService, securityService)
 	transportContainerHandler := handler.NewTransportContainerHandler(transportContainerService)
 	temperatureWindowHandler := handler.NewTemperatureWindowHandler(temperatureWindowService)
 	excursionEventHandler := handler.NewExcursionEventHandler(excursionEventService)
 	dispositionDecisionHandler := handler.NewDispositionDecisionHandler(dispositionDecisionService)
 	sensorEvidenceHandler := handler.NewSensorEvidenceHandler(sensorEvidenceService)
+	evidenceReviewSnapshotHandler := handler.NewEvidenceReviewSnapshotHandler(evidenceReviewSnapshotService)
 	systemHandler := handler.NewSystemHandler(securityService, transportContainerService, temperatureWindowService, excursionEventService, dispositionDecisionService, db, redisClient)
 
 	engine.GET("/healthz", systemHandler.Health)
@@ -69,6 +72,7 @@ func New(cfg config.Config, db *gorm.DB, redisClient *redis.Client, logger *slog
 	excursionEventHandler.Register(api)
 	dispositionDecisionHandler.Register(api)
 	sensorEvidenceHandler.Register(api)
+	evidenceReviewSnapshotHandler.Register(api)
 
 	engine.NoRoute(func(c *gin.Context) {
 		if c.Request.Method == http.MethodOptions {

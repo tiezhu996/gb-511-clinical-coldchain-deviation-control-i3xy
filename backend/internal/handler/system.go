@@ -16,6 +16,16 @@ import (
 )
 
 func handleError(c *gin.Context, err error) {
+	var conflict *service.SnapshotConflict
+	if errors.As(err, &conflict) {
+		// Snapshot conflicts keep the excursion in_review; surface the machine-readable conflict
+		// code, human-readable blocking reason and the offending evidence/snapshot reference.
+		c.AbortWithStatusJSON(http.StatusUnprocessableEntity, gin.H{
+			"error": "snapshot_conflict", "message": conflict.Reason,
+			"conflictCode": conflict.Code, "conflictRef": conflict.ConflictRef,
+		})
+		return
+	}
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		util.Fail(c, http.StatusNotFound, "not_found", "record was not found")

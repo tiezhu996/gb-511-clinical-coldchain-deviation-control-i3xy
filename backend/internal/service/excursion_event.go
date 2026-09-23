@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,12 +27,12 @@ type ExcursionEventService interface {
 type excursionEventService struct {
 	repository  repository.ExcursionEventRepository
 	disposition repository.DispositionDecisionRepository
-	evidence    repository.SensorEvidenceRepository
+	snapshots   EvidenceReviewSnapshotService
 	security    SecurityService
 }
 
-func NewExcursionEventService(repo repository.ExcursionEventRepository, disposition repository.DispositionDecisionRepository, evidence repository.SensorEvidenceRepository, security SecurityService) ExcursionEventService {
-	return &excursionEventService{repository: repo, disposition: disposition, evidence: evidence, security: security}
+func NewExcursionEventService(repo repository.ExcursionEventRepository, disposition repository.DispositionDecisionRepository, snapshots EvidenceReviewSnapshotService, security SecurityService) ExcursionEventService {
+	return &excursionEventService{repository: repo, disposition: disposition, snapshots: snapshots, security: security}
 }
 
 func (s *excursionEventService) List(ctx context.Context, query dto.PageQuery) (repository.Page[model.ExcursionEvent], error) {
@@ -128,13 +129,57 @@ func (s *excursionEventService) Transition(ctx context.Context, id uint, input d
 	if evidence == "" {
 		evidence = strings.TrimSpace(firstNonEmpty(current.SensorEvidence, current.Evidence))
 	}
-	if target == string(constants.ExcursionStateDecided) && evidence == "" {
-		return model.ExcursionEvent{}, fmt.Errorf("%w: sensor evidence is required before deciding an excursion", ErrInvalidInput)
-	}
 	if target == string(constants.ExcursionStateDecided) {
-		if count, err := s.evidence.CountForExcursion(ctx, current.Code); err != nil || count == 0 {
-			return model.ExcursionEvent{}, fmt.Errorf("%w: registered sensor evidence is required before deciding an excursion", ErrInvalidInput)
+		// A frozen evidence review snapshot is mandatory before evaluation. Selecting and
+		// validating the evidence here means a conflict keeps the excursion in_review and is
+		// persisted (with a conflict code) for display after refresh.
+		prepared, err := s.snapshots.PrepareEvaluation(ctx, current, actor)
+		if err != nil {
+			var conflict *SnapshotConflict
+			if errors.As(err, &conflict) {
+				current.ReviewBlockCode = conflict.Code
+				current.ReviewBlockReason = conflict.Reason
+				current.ReviewConflictRef = conflict.ConflictRef
+				_ = s.snapshots.PersistReviewBlock(ctx, id, input.ExpectedVersion, &current)
+			}
+			return model.ExcursionEvent{}, err
 		}
+		current.SnapshotCode = prepared.Snapshot.Code
+		current.ReviewBlockCode = ""
+		current.ReviewBlockReason = ""
+		current.ReviewConflictRef = ""
+		current.Status = target
+		current.SensorEvidence = evidence
+		current.Evidence = evidence
+		current.Reviewer = actor
+		current.Version = input.ExpectedVersion + 1
+		current.UpdatedAt = time.Now().UTC()
+		detail, _ := json.Marshal(map[string]any{
+			"reason": input.Reason, "sensorEvidence": evidence, "containerCode": current.ContainerCode,
+			"snapshotCode": prepared.Snapshot.Code, "evidenceCode": prepared.Snapshot.EvidenceCode,
+			"sha256": prepared.Snapshot.SHA256,
+		})
+		auditEntry := auditLog(actor, requestID, "transition", "ExcursionEvent", id, before, target, string(detail))
+		snapshot := prepared.Snapshot
+		if !prepared.IsNew {
+			snapshot = model.EvidenceReviewSnapshot{}
+		}
+		if err := s.snapshots.CommitEvaluation(ctx, id, input.ExpectedVersion, &current, &snapshot, auditEntry); err != nil {
+			if errors.Is(err, repository.ErrSnapshotDigestReused) {
+				conflict := &SnapshotConflict{
+					Code:        ReviewBlockDigestReused,
+					Reason:      fmt.Sprintf("摘要重复：证据 %s 的 SHA-256 已被其他偏差的复核快照冻结", prepared.Snapshot.EvidenceCode),
+					ConflictRef: prepared.Snapshot.EvidenceCode,
+				}
+				current.ReviewBlockCode = conflict.Code
+				current.ReviewBlockReason = conflict.Reason
+				current.ReviewConflictRef = conflict.ConflictRef
+				_ = s.snapshots.PersistReviewBlock(ctx, id, input.ExpectedVersion, &current)
+				return model.ExcursionEvent{}, conflict
+			}
+			return model.ExcursionEvent{}, fmt.Errorf("transition 偏差事件: %w", err)
+		}
+		return s.repository.Get(ctx, id)
 	}
 	if target == string(constants.ExcursionStateClosed) {
 		final, err := s.disposition.HasFinalForExcursion(ctx, current.Code)
@@ -145,7 +190,7 @@ func (s *excursionEventService) Transition(ctx context.Context, id uint, input d
 	current.Status = target
 	current.SensorEvidence = evidence
 	current.Evidence = evidence
-	if target == string(constants.ExcursionStateInReview) || target == string(constants.ExcursionStateDecided) {
+	if target == string(constants.ExcursionStateInReview) {
 		current.Reviewer = actor
 	}
 	current.Version = input.ExpectedVersion + 1

@@ -25,12 +25,12 @@ type DispositionDecisionService interface {
 
 type dispositionDecisionService struct {
 	repository repository.DispositionDecisionRepository
-	evidence   repository.SensorEvidenceRepository
+	snapshots  EvidenceReviewSnapshotService
 	security   SecurityService
 }
 
-func NewDispositionDecisionService(repo repository.DispositionDecisionRepository, evidence repository.SensorEvidenceRepository, security SecurityService) DispositionDecisionService {
-	return &dispositionDecisionService{repository: repo, evidence: evidence, security: security}
+func NewDispositionDecisionService(repo repository.DispositionDecisionRepository, snapshots EvidenceReviewSnapshotService, security SecurityService) DispositionDecisionService {
+	return &dispositionDecisionService{repository: repo, snapshots: snapshots, security: security}
 }
 
 func (s *dispositionDecisionService) List(ctx context.Context, query dto.PageQuery) (repository.Page[model.DispositionDecision], error) {
@@ -63,9 +63,15 @@ func (s *dispositionDecisionService) Create(ctx context.Context, input dto.Creat
 	if item.ExcursionCode == "" || item.SensorEvidence == "" {
 		return model.DispositionDecision{}, fmt.Errorf("%w: excursion code and sensor evidence are required", ErrInvalidInput)
 	}
-	if count, err := s.evidence.CountForExcursion(ctx, item.ExcursionCode); err != nil || count == 0 {
-		return model.DispositionDecision{}, fmt.Errorf("%w: registered sensor evidence is required for the excursion", ErrInvalidInput)
+	snapshot, err := s.snapshots.GetByExcursion(ctx, item.ExcursionCode)
+	if err != nil {
+		return model.DispositionDecision{}, fmt.Errorf("%w: the excursion must have a frozen evidence review snapshot before a disposition is created", ErrInvalidInput)
 	}
+	if strings.TrimSpace(input.SnapshotSHA256) != "" && !strings.EqualFold(input.SnapshotSHA256, snapshot.SHA256) {
+		return model.DispositionDecision{}, fmt.Errorf("%w: supplied snapshot digest does not match the frozen review snapshot", ErrInvalidInput)
+	}
+	item.SnapshotSHA256 = strings.ToLower(snapshot.SHA256)
+	item.SnapshotEvidenceCode = snapshot.EvidenceCode
 	if err := s.repository.Create(ctx, &item); err != nil {
 		return model.DispositionDecision{}, fmt.Errorf("create 处置决定: %w", err)
 	}
@@ -101,9 +107,14 @@ func (s *dispositionDecisionService) Update(ctx context.Context, id uint, input 
 	if current.ExcursionCode == "" || current.DecisionBasis == "" || current.SensorEvidence == "" {
 		return model.DispositionDecision{}, fmt.Errorf("%w: excursion, basis and sensor evidence cannot be cleared", ErrInvalidInput)
 	}
-	if count, err := s.evidence.CountForExcursion(ctx, current.ExcursionCode); err != nil || count == 0 {
-		return model.DispositionDecision{}, fmt.Errorf("%w: registered sensor evidence is required for the excursion", ErrInvalidInput)
+	snapshot, err := s.snapshots.GetByExcursion(ctx, current.ExcursionCode)
+	if err != nil {
+		return model.DispositionDecision{}, fmt.Errorf("%w: the excursion must have a frozen evidence review snapshot", ErrInvalidInput)
 	}
+	if !strings.EqualFold(current.SnapshotSHA256, snapshot.SHA256) {
+		return model.DispositionDecision{}, fmt.Errorf("%w: disposition snapshot digest no longer matches the frozen review snapshot", ErrInvalidInput)
+	}
+	current.SnapshotEvidenceCode = snapshot.EvidenceCode
 	current.Version = input.ExpectedVersion + 1
 	current.UpdatedAt = time.Now().UTC()
 	if err := s.repository.Update(ctx, id, input.ExpectedVersion, &current); err != nil {
@@ -135,8 +146,14 @@ func (s *dispositionDecisionService) Transition(ctx context.Context, id uint, in
 	if evidence == "" {
 		return model.DispositionDecision{}, fmt.Errorf("%w: sensor evidence is required for a disposition decision", ErrInvalidInput)
 	}
-	if count, err := s.evidence.CountForExcursion(ctx, current.ExcursionCode); err != nil || count == 0 {
-		return model.DispositionDecision{}, fmt.Errorf("%w: registered sensor evidence is required for approval", ErrInvalidInput)
+	// Approval re-verifies the frozen snapshot digest: the excursion cannot have been evaluated
+	// without a snapshot, and the disposition must still point at the exact frozen digest.
+	snapshot, err := s.snapshots.GetByExcursion(ctx, current.ExcursionCode)
+	if err != nil {
+		return model.DispositionDecision{}, fmt.Errorf("%w: a frozen evidence review snapshot is required for approval", ErrInvalidInput)
+	}
+	if current.SnapshotSHA256 == "" || !strings.EqualFold(current.SnapshotSHA256, snapshot.SHA256) {
+		return model.DispositionDecision{}, fmt.Errorf("%w: disposition snapshot digest does not match the frozen review snapshot", ErrInvalidInput)
 	}
 	current.Status = target
 	current.SensorEvidence = evidence
@@ -149,7 +166,7 @@ func (s *dispositionDecisionService) Transition(ctx context.Context, id uint, in
 	current.UpdatedAt = now
 	detail, _ := json.Marshal(map[string]any{
 		"reason": input.Reason, "sensorEvidence": evidence, "excursionCode": current.ExcursionCode,
-		"proposedBy": current.ProposedBy, "approvedBy": actor,
+		"proposedBy": current.ProposedBy, "approvedBy": actor, "snapshotSha256": current.SnapshotSHA256,
 	})
 	if err := s.repository.Update(ctx, id, input.ExpectedVersion, &current, auditLog(actor, requestID, "transition", "DispositionDecision", id, before, target, string(detail))); err != nil {
 		return model.DispositionDecision{}, fmt.Errorf("transition 处置决定: %w", err)

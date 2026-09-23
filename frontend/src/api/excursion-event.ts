@@ -8,8 +8,8 @@ export async function listExcursionEvent(page = 1, pageSize = 20, search = '') {
 export async function createExcursionEvent(input: Partial<DomainRecord>) {
   return request<DomainRecord>('/excursions', { method: 'POST', body: JSON.stringify(input) });
 }
-export async function transitionExcursionEvent(id: number, status: string, expectedVersion: number, reason: string) {
+export async function transitionExcursionEvent(id: number, status: string, expectedVersion: number, reason: string, evidence?: string) {
   return request<DomainRecord>(`/excursions/${id}/transition`, {
-    method: 'POST', body: JSON.stringify({ status, expectedVersion, reason }),
+    method: 'POST', body: JSON.stringify({ status, expectedVersion, reason, evidence }),
   });
 }

@@ -20,6 +20,8 @@ type CreateDispositionDecision struct {
 	ExcursionCode  string    `json:"excursionCode" binding:"max=64"`
 	DecisionBasis  string    `json:"decisionBasis" binding:"max=1000"`
 	SensorEvidence string    `json:"sensorEvidence" binding:"max=2000"`
+	// Optional: when omitted the server binds the frozen review snapshot digest of the excursion.
+	SnapshotSHA256 string `json:"snapshotSha256" binding:"omitempty,len=64,hexadecimal"`
 }
 
 type UpdateDispositionDecision struct {

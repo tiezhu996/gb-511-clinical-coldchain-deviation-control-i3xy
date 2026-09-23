@@ -23,6 +23,12 @@ type ExcursionEvent struct {
 	EffectiveAt     time.Time `json:"effectiveAt"`
 	Evidence        string    `json:"evidence" gorm:"size:2000"`
 	RelatedCode     string    `json:"relatedCode" gorm:"size:64;index"`
+	// Review snapshot fields: SnapshotCode references the frozen evidence review snapshot once
+	// the excursion is decided; ReviewBlock* persist the latest conflict while it stays in_review.
+	SnapshotCode      string `json:"snapshotCode" gorm:"size:64;index"`
+	ReviewBlockCode   string `json:"reviewBlockCode" gorm:"size:40"`
+	ReviewBlockReason string `json:"reviewBlockReason" gorm:"size:500"`
+	ReviewConflictRef string `json:"reviewConflictRef" gorm:"size:128"`
 }
 
 func (item *ExcursionEvent) GetBase() *BaseModel { return &item.BaseModel }

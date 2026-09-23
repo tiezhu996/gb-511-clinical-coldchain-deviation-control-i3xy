@@ -20,3 +20,20 @@ type SensorEvidence struct {
 }
 
 func (SensorEvidence) TableName() string { return "sensor_evidence" }
+
+// EvidenceReviewSnapshot is the frozen cold-chain evidence review record captured when an
+// excursion moves from in_review to decided. It pins the registered evidence code, SHA-256
+// digest and container code. The unique index on SHA256 enforces that one digest can back the
+// evaluation of a single excursion only; snapshots are immutable once written.
+type EvidenceReviewSnapshot struct {
+	ID            uint      `json:"id" gorm:"primaryKey"`
+	Code          string    `json:"code" gorm:"size:64;uniqueIndex;not null"`
+	ExcursionCode string    `json:"excursionCode" gorm:"size:64;uniqueIndex;not null"`
+	EvidenceCode  string    `json:"evidenceCode" gorm:"size:64;index;not null"`
+	SHA256        string    `json:"sha256" gorm:"size:64;uniqueIndex;not null"`
+	ContainerCode string    `json:"containerCode" gorm:"size:64;index;not null"`
+	CreatedAt     time.Time `json:"createdAt" gorm:"index"`
+	CreatedBy     string    `json:"createdBy" gorm:"size:80;not null"`
+}
+
+func (EvidenceReviewSnapshot) TableName() string { return "evidence_review_snapshots" }

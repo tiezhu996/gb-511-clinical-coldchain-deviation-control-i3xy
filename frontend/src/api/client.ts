@@ -18,6 +18,21 @@ export function getSession(): UserSession | null {
   }
 }
 
+// ApiError preserves the machine-readable error code plus the snapshot conflict fields returned by
+// the review-snapshot gate, so pages can keep an excursion pending and show the blocking reason.
+export class ApiError extends Error {
+  code: string;
+  conflictCode?: string;
+  conflictRef?: string;
+  constructor(message: string, code: string, conflictCode?: string, conflictRef?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+    this.conflictCode = conflictCode;
+    this.conflictRef = conflictRef;
+  }
+}
+
 export async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T>> {
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
@@ -28,6 +43,6 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   if (response.status === 204) return { data: undefined as T };
   const payload = await response.json().catch(() => ({ error: 'invalid_response', message: '服务返回了无法解析的响应' }));
   if (response.status === 401) clearSession();
-  if (!response.ok) throw new Error(payload.message || payload.error || `HTTP ${response.status}`);
+  if (!response.ok) throw new ApiError(payload.message || payload.error || `HTTP ${response.status}`, payload.error, payload.conflictCode, payload.conflictRef);
   return payload as ApiEnvelope<T>;
 }

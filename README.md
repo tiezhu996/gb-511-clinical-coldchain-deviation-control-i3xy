@@ -31,11 +31,13 @@ docker compose down -v --remove-orphans
 | 偏差事件 | `ExcursionEvent` | `/api/excursions` | open, in_review, decided, closed |
 | 处置决定 | `DispositionDecision` | `/api/dispositions` | draft, release, quarantine, discard |
 | 传感器证据 | `SensorEvidence` | `/api/evidence` | 不可变登记记录 |
+| 证据复核快照 | `EvidenceReviewSnapshot` | `/api/evidence-snapshots` | 偏差评估时冻结、不可变 |
 
 - JWT 登录和 viewer/operator/reviewer/admin 四级 RBAC。
 - 用户与启用角色在每次请求时回查角色表，令牌中的旧角色不能绕过停用或降权。
 - 偏差与处置状态变化使用乐观锁，并与 request ID、前后状态、证据一起原子写入审计日志。
 - 传感器证据拥有独立实体和五层后端实现，通过 MinIO 生成限时上传地址并保存 SHA-256 元数据。
+- 冷链证据复核快照：偏差由待复核转已评估时，系统从已登记证据中选取一条并冻结证据编号、SHA-256 和容器编码；SHA-256 唯一约束保证同一摘要不能复用于其他偏差。证据缺失、容器不一致或摘要重复时偏差保持待复核，返回 `EVIDENCE_MISSING`/`CONTAINER_MISMATCH`/`DIGEST_REUSED` 冲突编号并落库，刷新后可回读。处置决定的创建与批准都校验冻结快照摘要。
 - 处置决定实行双人复核：提议人不能批准自己的提议，最终决定不可编辑或反向迁移；偏差没有最终处置时不能关闭。
 - 请求 ID、结构化日志、全局错误映射和 Redis 分布式限流。
 - 提供脱敏运行配置、当前会话、审计汇总和单实体审计历史接口。

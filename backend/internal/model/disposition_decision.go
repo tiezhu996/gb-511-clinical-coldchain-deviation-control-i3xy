@@ -22,6 +22,10 @@ type DispositionDecision struct {
 	EffectiveAt    time.Time  `json:"effectiveAt"`
 	Evidence       string     `json:"evidence" gorm:"size:2000"`
 	RelatedCode    string     `json:"relatedCode" gorm:"size:64;index"`
+	// Frozen evidence digest verified against the excursion's review snapshot before a
+	// disposition is created and again before it is approved.
+	SnapshotSHA256       string `json:"snapshotSha256" gorm:"size:64;index"`
+	SnapshotEvidenceCode string `json:"snapshotEvidenceCode" gorm:"size:64"`
 }
 
 func (item *DispositionDecision) GetBase() *BaseModel { return &item.BaseModel }

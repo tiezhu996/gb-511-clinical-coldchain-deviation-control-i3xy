@@ -56,3 +56,44 @@ func (h *SensorEvidenceHandler) create(c *gin.Context) {
 	}
 	util.Created(c, item)
 }
+
+// EvidenceReviewSnapshotHandler exposes the immutable review snapshots. Snapshots are
+// system-generated when an excursion is decided, so only read routes are offered.
+type EvidenceReviewSnapshotHandler struct {
+	service service.EvidenceReviewSnapshotService
+}
+
+func NewEvidenceReviewSnapshotHandler(value service.EvidenceReviewSnapshotService) *EvidenceReviewSnapshotHandler {
+	return &EvidenceReviewSnapshotHandler{service: value}
+}
+
+func (h *EvidenceReviewSnapshotHandler) Register(group *gin.RouterGroup) {
+	resource := group.Group("/evidence-snapshots")
+	resource.GET("", h.list)
+	resource.GET("/:id", h.get)
+}
+
+func (h *EvidenceReviewSnapshotHandler) list(c *gin.Context) {
+	page := bindPage(c)
+	result, err := h.service.List(c.Request.Context(), dto.PageQuery{
+		Page: page.Page, PageSize: page.PageSize, Search: c.Query("search"),
+	}, c.Query("excursionCode"))
+	if err != nil {
+		handleError(c, err)
+		return
+	}
+	util.Page(c, result.Items, result.Page, result.PageSize, result.Total)
+}
+
+func (h *EvidenceReviewSnapshotHandler) get(c *gin.Context) {
+	id, ok := parseID(c)
+	if !ok {
+		return
+	}
+	item, err := h.service.Get(c.Request.Context(), id)
+	if err != nil {
+		handleError(c, err)
+		return
+	}
+	util.OK(c, item)
+}
