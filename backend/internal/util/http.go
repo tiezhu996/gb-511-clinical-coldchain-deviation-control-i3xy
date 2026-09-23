@@ -7,10 +7,11 @@ import (
 )
 
 type Envelope struct {
-	Data    any    `json:"data,omitempty"`
-	Error   string `json:"error,omitempty"`
-	Message string `json:"message,omitempty"`
-	Meta    any    `json:"meta,omitempty"`
+	Data         any    `json:"data,omitempty"`
+	Error        string `json:"error,omitempty"`
+	Message      string `json:"message,omitempty"`
+	ConflictCode string `json:"conflictCode,omitempty"`
+	Meta         any    `json:"meta,omitempty"`
 }
 
 func OK(c *gin.Context, data any) {
@@ -27,6 +28,12 @@ func NoContent(c *gin.Context) {
 
 func Fail(c *gin.Context, status int, code, message string) {
 	c.AbortWithStatusJSON(status, Envelope{Error: code, Message: message})
+}
+
+// FailConflict reports a business conflict that carries the code of the record
+// blocking the request (for example a duplicated evidence digest owner).
+func FailConflict(c *gin.Context, status int, code, message, conflictCode string) {
+	c.AbortWithStatusJSON(status, Envelope{Error: code, Message: message, ConflictCode: conflictCode})
 }
 
 func Page(c *gin.Context, data any, page, pageSize int, total int64) {

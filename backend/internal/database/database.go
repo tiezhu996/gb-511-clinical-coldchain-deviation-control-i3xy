@@ -82,6 +82,7 @@ func migrate(db *gorm.DB) error {
 		&model.TemperatureWindow{},
 		&model.ExcursionEvent{},
 		&model.DispositionDecision{},
+		&model.EvidenceReviewSnapshot{},
 	)
 }
 
@@ -133,6 +134,10 @@ func Seed(ctx context.Context, db *gorm.DB) error {
 	}
 
 	if err := seedDispositionDecision(ctx, db); err != nil {
+		return err
+	}
+
+	if err := seedEvidenceReviewSnapshot(ctx, db); err != nil {
 		return err
 	}
 
@@ -216,3 +221,17 @@ func seedSensorEvidence(ctx context.Context, db *gorm.DB) error {
 }
 
 func timePointer(value time.Time) *time.Time { return &value }
+
+// seedEvidenceReviewSnapshot freezes the review snapshot for the demo excursion
+// that is already decided so disposition validation stays consistent.
+func seedEvidenceReviewSnapshot(ctx context.Context, db *gorm.DB) error {
+	var count int64
+	if err := db.WithContext(ctx).Model(&model.EvidenceReviewSnapshot{}).Count(&count).Error; err != nil || count > 0 {
+		return err
+	}
+	now := time.Now().UTC()
+	items := []model.EvidenceReviewSnapshot{
+		{Code: "RS-EE-003", ExcursionCode: "EE-003", EvidenceCode: "SE-003", SHA256: strings.Repeat("c", 64), ContainerCode: "TC-001", CreatedBy: "reviewer", CreatedAt: now.Add(-6 * time.Hour)},
+	}
+	return db.WithContext(ctx).Create(&items).Error
+}

@@ -26,11 +26,12 @@ type DispositionDecisionService interface {
 type dispositionDecisionService struct {
 	repository repository.DispositionDecisionRepository
 	evidence   repository.SensorEvidenceRepository
+	snapshots  repository.EvidenceReviewSnapshotRepository
 	security   SecurityService
 }
 
-func NewDispositionDecisionService(repo repository.DispositionDecisionRepository, evidence repository.SensorEvidenceRepository, security SecurityService) DispositionDecisionService {
-	return &dispositionDecisionService{repository: repo, evidence: evidence, security: security}
+func NewDispositionDecisionService(repo repository.DispositionDecisionRepository, evidence repository.SensorEvidenceRepository, snapshots repository.EvidenceReviewSnapshotRepository, security SecurityService) DispositionDecisionService {
+	return &dispositionDecisionService{repository: repo, evidence: evidence, snapshots: snapshots, security: security}
 }
 
 func (s *dispositionDecisionService) List(ctx context.Context, query dto.PageQuery) (repository.Page[model.DispositionDecision], error) {
@@ -65,6 +66,9 @@ func (s *dispositionDecisionService) Create(ctx context.Context, input dto.Creat
 	}
 	if count, err := s.evidence.CountForExcursion(ctx, item.ExcursionCode); err != nil || count == 0 {
 		return model.DispositionDecision{}, fmt.Errorf("%w: registered sensor evidence is required for the excursion", ErrInvalidInput)
+	}
+	if _, err := s.requireReviewSnapshot(ctx, item.ExcursionCode); err != nil {
+		return model.DispositionDecision{}, err
 	}
 	if err := s.repository.Create(ctx, &item); err != nil {
 		return model.DispositionDecision{}, fmt.Errorf("create 处置决定: %w", err)
@@ -138,6 +142,10 @@ func (s *dispositionDecisionService) Transition(ctx context.Context, id uint, in
 	if count, err := s.evidence.CountForExcursion(ctx, current.ExcursionCode); err != nil || count == 0 {
 		return model.DispositionDecision{}, fmt.Errorf("%w: registered sensor evidence is required for approval", ErrInvalidInput)
 	}
+	snapshot, err := s.requireReviewSnapshot(ctx, current.ExcursionCode)
+	if err != nil {
+		return model.DispositionDecision{}, err
+	}
 	current.Status = target
 	current.SensorEvidence = evidence
 	current.Evidence = evidence
@@ -150,6 +158,7 @@ func (s *dispositionDecisionService) Transition(ctx context.Context, id uint, in
 	detail, _ := json.Marshal(map[string]any{
 		"reason": input.Reason, "sensorEvidence": evidence, "excursionCode": current.ExcursionCode,
 		"proposedBy": current.ProposedBy, "approvedBy": actor,
+		"reviewSnapshot": snapshot.Code, "snapshotDigest": shortDigest(snapshot.SHA256),
 	})
 	if err := s.repository.Update(ctx, id, input.ExpectedVersion, &current, auditLog(actor, requestID, "transition", "DispositionDecision", id, before, target, string(detail))); err != nil {
 		return model.DispositionDecision{}, fmt.Errorf("transition 处置决定: %w", err)
@@ -177,6 +186,24 @@ func validateDispositionDecisionBusinessFields(code, name, facility, owner strin
 		return ErrInvalidInput
 	}
 	return nil
+}
+
+// requireReviewSnapshot enforces that the excursion was evaluated through a frozen
+// evidence review snapshot and that the frozen digest still resolves to registered
+// sensor evidence for that excursion.
+func (s *dispositionDecisionService) requireReviewSnapshot(ctx context.Context, excursionCode string) (model.EvidenceReviewSnapshot, error) {
+	snapshot, err := s.snapshots.GetForExcursion(ctx, excursionCode)
+	if err != nil {
+		return model.EvidenceReviewSnapshot{}, fmt.Errorf("%w: excursion %s has no evidence review snapshot; decide the excursion first", ErrInvalidInput, excursionCode)
+	}
+	registered, err := s.evidence.DigestRegisteredForExcursion(ctx, excursionCode, snapshot.SHA256)
+	if err != nil {
+		return model.EvidenceReviewSnapshot{}, fmt.Errorf("verify review snapshot digest: %w", err)
+	}
+	if !registered {
+		return model.EvidenceReviewSnapshot{}, fmt.Errorf("%w: review snapshot digest %s no longer matches registered evidence for %s", ErrInvalidInput, shortDigest(snapshot.SHA256), excursionCode)
+	}
+	return snapshot, nil
 }
 
 func validateIndependentApproval(proposedBy, approvedBy string) error {

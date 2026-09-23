@@ -33,6 +33,10 @@ export interface DomainRecord {
   detectedAt?: string;
   sensorEvidence?: string;
   reviewer?: string;
+  reviewSnapshotCode?: string;
+  reviewSnapshotDigest?: string;
+  reviewSnapshotContainer?: string;
+  reviewBlockReason?: string;
   excursionCode?: string;
   decisionBasis?: string;
   proposedBy?: string;

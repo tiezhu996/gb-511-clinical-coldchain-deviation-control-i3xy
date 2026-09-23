@@ -17,8 +17,9 @@ import { StatusBadge } from '../components/common/StatusBadge';
 import { TemperatureBadge } from '../components/common/TemperatureBadge';
 import { EvidenceList } from '../components/common/EvidenceList';
 import { DecisionPanel } from '../components/common/DecisionPanel';
+import { SnapshotPanel } from '../components/common/SnapshotPanel';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
-import { formatDate } from '../utils/format';
+import { formatDate, sha256Hex } from '../utils/format';
 
 function nextExcursionState(item: DomainRecord) {
   if (item.status === 'open') return 'in_review';
@@ -50,8 +51,9 @@ export default function ExcursionEventPage() {
   const createExcursion = async () => {
     const suffix = Date.now().toString().slice(-5); const now = new Date().toISOString();
     const code = `EE-UI-${suffix}`; const objectKey = `sensor/tc-002/${code.toLowerCase()}.csv`;
+    const digest = await sha256Hex(`${code}|${now}|TC-002`);
     await excursions.createRecord('excursions', { code, name: 'TC-002 温度越界告警', description: '内置工作台登记的传感器高温偏差', facility: '沪杭运输线', owner: '未分配', category: '高温偏差', riskLevel: 'high', metricValue: 9.3, metricUnit: 'C', effectiveAt: now, evidence: `minio://clinical-evidence/${objectKey}`, relatedCode: 'TC-002', containerCode: 'TC-002', windowCode: 'TW-001', observedTempC: 9.3, durationMinutes: 18, detectedAt: now, sensorEvidence: `minio://clinical-evidence/${objectKey}` });
-    await registerSensorEvidence({ code: `SE-${suffix}`, excursionCode: code, containerCode: 'TC-002', objectKey, sha256: 'd'.repeat(64), mediaType: 'text/csv', sizeBytes: 2048, capturedAt: now, source: 'ui-logger-import' });
+    await registerSensorEvidence({ code: `SE-${suffix}`, excursionCode: code, containerCode: 'TC-002', objectKey, sha256: digest, mediaType: 'text/csv', sizeBytes: 2048, capturedAt: now, source: 'ui-logger-import' });
     await evidenceStore.load();
     setCreateOpen(false);
   };
@@ -64,8 +66,8 @@ export default function ExcursionEventPage() {
     <section className="metrics"><MetricCard label="偏差事件" value={excursions.meta.total} detail="全量可追溯" /><MetricCard label="待闭环" value={pendingCount} detail="待质量评估" /><MetricCard label="严重偏差" value={critical} detail="优先隔离" /></section>
     {(excursions.error || evidenceStore.error) && <div className="alert" role="alert">{excursions.error || evidenceStore.error}</div>}
     <section className="split-workspace"><div className="record-list">{excursions.items.map((item) => { const rule = windows.items.find((window) => window.code === item.windowCode); return <button key={item.id} className={selectedId === item.id ? 'record-row selected' : 'record-row'} onClick={() => setSelectedId(item.id)}><span><strong>{item.code}</strong><small>{item.containerCode || item.relatedCode} · {item.windowCode || '未绑定规则'}</small></span><TemperatureBadge value={item.observedTempC ?? item.metricValue} minimum={rule?.minimumCelsius} maximum={rule?.maximumCelsius} /><StatusBadge status={item.status} /></button>; })}</div>
-      <aside className="detail-pane">{selected ? <><header><div><small>{selected.code}</small><h2>{selected.name}</h2></div><StatusBadge status={selected.status} /></header><div className="detail-grid"><span><small>运输容器</small>{selected.containerCode || selected.relatedCode}</span><span><small>温控规则</small>{selected.windowCode || '-'}</span><span><small>持续时长</small>{selected.durationMinutes || 0} 分钟</span><span><small>检测时间</small>{formatDate(selected.detectedAt || selected.effectiveAt)}</span></div><h3>传感器证据</h3><EvidenceList evidence={selectedEvidence.length ? selectedEvidence : selected.sensorEvidence || selected.evidence} /><DecisionPanel decision={decision} compact />{canReview && nextExcursionState(selected) && <Button variant="contained" startIcon={<TaskAltOutlinedIcon />} onClick={() => setPending({ item: selected, state: nextExcursionState(selected) })}>{selected.status === 'open' ? '接收复核' : selected.status === 'in_review' ? '完成影响评估' : '关闭事件'}</Button>}</> : <div className="empty">选择一个偏差事件</div>}</aside></section>
+      <aside className="detail-pane">{selected ? <><header><div><small>{selected.code}</small><h2>{selected.name}</h2></div><StatusBadge status={selected.status} /></header><div className="detail-grid"><span><small>运输容器</small>{selected.containerCode || selected.relatedCode}</span><span><small>温控规则</small>{selected.windowCode || '-'}</span><span><small>持续时长</small>{selected.durationMinutes || 0} 分钟</span><span><small>检测时间</small>{formatDate(selected.detectedAt || selected.effectiveAt)}</span></div><SnapshotPanel excursion={selected} /><h3>传感器证据</h3><EvidenceList evidence={selectedEvidence.length ? selectedEvidence : selected.sensorEvidence || selected.evidence} /><DecisionPanel decision={decision} compact />{canReview && nextExcursionState(selected) && <Button variant="contained" startIcon={<TaskAltOutlinedIcon />} onClick={() => setPending({ item: selected, state: nextExcursionState(selected) })}>{selected.status === 'open' ? '接收复核' : selected.status === 'in_review' ? '完成影响评估' : '关闭事件'}</Button>}</> : <div className="empty">选择一个偏差事件</div>}</aside></section>
     <ConfirmDialog open={createOpen} title="登记温度偏差" onCancel={() => setCreateOpen(false)} onConfirm={() => void createExcursion()}><p>将保存容器、温控规则、峰值温度、持续时长和 MinIO 传感器证据。</p></ConfirmDialog>
-    <ConfirmDialog open={Boolean(pending)} title="确认偏差状态迁移" onCancel={() => setPending(null)} onConfirm={() => void transition()}><p>偏差不能跳过复核；形成影响评估时必须存在传感器证据。</p><strong>{pending?.item.status} → {pending?.state}</strong></ConfirmDialog>
+    <ConfirmDialog open={Boolean(pending)} title="确认偏差状态迁移" onCancel={() => setPending(null)} onConfirm={() => void transition()}><p>偏差不能跳过复核；完成影响评估时系统会冻结一条已登记证据的编号、SHA-256 与容器编码，证据缺失、容器不一致或摘要重复将保持待复核。</p><strong>{pending?.item.status} → {pending?.state}</strong></ConfirmDialog>
   </main>;
 }

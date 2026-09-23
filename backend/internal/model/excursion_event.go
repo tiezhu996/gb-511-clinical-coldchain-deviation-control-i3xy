@@ -23,6 +23,14 @@ type ExcursionEvent struct {
 	EffectiveAt     time.Time `json:"effectiveAt"`
 	Evidence        string    `json:"evidence" gorm:"size:2000"`
 	RelatedCode     string    `json:"relatedCode" gorm:"size:64;index"`
+	// ReviewBlockReason persists the last evidence review conflict so the
+	// excursion page can show why the excursion is still waiting for review.
+	ReviewBlockReason string `json:"reviewBlockReason" gorm:"size:500"`
+	// Snapshot fields are read-only projections of EvidenceReviewSnapshot and
+	// are populated by the service layer; they are never stored on the excursion.
+	ReviewSnapshotCode      string `json:"reviewSnapshotCode" gorm:"-"`
+	ReviewSnapshotDigest    string `json:"reviewSnapshotDigest" gorm:"-"`
+	ReviewSnapshotContainer string `json:"reviewSnapshotContainer" gorm:"-"`
 }
 
 func (item *ExcursionEvent) GetBase() *BaseModel { return &item.BaseModel }

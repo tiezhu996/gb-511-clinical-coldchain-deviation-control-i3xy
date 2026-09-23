@@ -14,6 +14,8 @@ type SensorEvidenceRepository interface {
 	Get(context.Context, uint) (model.SensorEvidence, error)
 	Create(context.Context, *model.SensorEvidence, *model.AuditLog) error
 	CountForExcursion(context.Context, string) (int64, error)
+	LatestForExcursion(context.Context, string) (model.SensorEvidence, error)
+	DigestRegisteredForExcursion(context.Context, string, string) (bool, error)
 	ReferencesExist(context.Context, string, string) (bool, error)
 }
 
@@ -58,6 +60,19 @@ func (r *sensorEvidenceRepository) Create(ctx context.Context, item *model.Senso
 func (r *sensorEvidenceRepository) CountForExcursion(ctx context.Context, code string) (int64, error) {
 	var total int64
 	return total, r.db.WithContext(ctx).Model(&model.SensorEvidence{}).Where("excursion_code = ?", code).Count(&total).Error
+}
+
+func (r *sensorEvidenceRepository) LatestForExcursion(ctx context.Context, code string) (model.SensorEvidence, error) {
+	var item model.SensorEvidence
+	err := r.db.WithContext(ctx).Where("excursion_code = ?", code).Order("captured_at DESC, id DESC").First(&item).Error
+	return item, err
+}
+
+func (r *sensorEvidenceRepository) DigestRegisteredForExcursion(ctx context.Context, code, digest string) (bool, error) {
+	var total int64
+	err := r.db.WithContext(ctx).Model(&model.SensorEvidence{}).
+		Where("excursion_code = ? AND sha256 = ?", code, strings.ToLower(strings.TrimSpace(digest))).Count(&total).Error
+	return total > 0, err
 }
 
 func (r *sensorEvidenceRepository) ReferencesExist(ctx context.Context, excursion, container string) (bool, error) {
